@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StyleAI - Your Personal AI Fashion Stylist</title>
+    <title>Cura - Your Personal AI Fashion Stylist</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @keyframes spin {
@@ -49,18 +49,18 @@
         }
 
         function updateOccasion(value) {
+            state.occasion = value;
             localStorage.setItem('last_occasion', value);
-            setState({ occasion: value });
         }
 
         function updateVibe(value) {
+            state.vibe = value;
             localStorage.setItem('last_vibe', value);
-            setState({ vibe: value });
         }
 
         function updateToken(value) {
+            state.replicateToken = value;
             localStorage.setItem('replicate_token', value);
-            setState({ replicateToken: value });
         }
 
         async function generateOutfitImage(outfit, index, personDescription) {
@@ -207,7 +207,7 @@ Be EXTREMELY detailed with colors, fabrics, and styles so AI can visualize accur
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3l14 9-14 9V3z"/>
                         </svg>
                         <h1 class="text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-                            StyleAI
+                            Cura
                         </h1>
                     </div>
                     <p class="text-gray-600">Your Personal AI Fashion Stylist</p>
