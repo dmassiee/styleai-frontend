@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StyleAI - Your Personal AI Fashion Stylist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 min-h-screen">
+    <div id="app" class="max-w-6xl mx-auto p-6"></div>
+
+    <script type="module">
+        const BACKEND_URL = 'https://fashion-ai-backend-tau.vercel.app/api/generate-image';
+        const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+
+        let state = {
+            photo: null,
+            occasion: localStorage.getItem('last_occasion') || '',
+            vibe: localStorage.getItem('last_vibe') || '',
+            loading: false,
+            outfits: [],
+            generatingImages: {},
+            replicateToken: localStorage.getItem('replicate_token') || '',
+            showTokenInput: false
+        };
+
+        function setState(updates) {
+            state = { ...state, ...updates };
+            render();
+        }
+
+        function handleFileUpload(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    setState({ photo: reader.result });
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function updateOccasion(value) {
+            localStorage.setItem('last_occasion', value);
+            setState({ occasion: value });
+        }
+
+        function updateVibe(value) {
+            localStorage.setItem('last_vibe', value);
+            setState({ vibe: value });
+        }
+
+        function updateToken(value) {
+            localStorage.setItem('replicate_token', value);
+            setState({ replicateToken: value });
+        }
+
+        async function generateOutfitImage(outfit, index, personDescription) {
+            if (!state.replicateToken) {
+                alert('Please add your Replicate API token first!');
+                return;
+            }
+
+            setState({ 
+                generatingImages: { ...state.generatingImages, [index]: true } 
+            });
+
+            try {
+                const itemsList = outfit.items.map(item => item.details).join(', ');
+                const prompt = `Professional fashion photography, full body shot, ${personDescription} fashion model wearing ${itemsList}, ${state.vibe} style, studio lighting, high quality, detailed clothing, fashion catalog, professional photography, 4k, sharp focus`;
+
+                const response = await fetch(BACKEND_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        replicateToken: state.replicateToken
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Backend error: ${response.status} - ${errorText}`);
+                }
+
+                const data = await response.json();
+                
+                if (data.error) throw new Error(data.error);
+                if (!data.imageUrl) throw new Error('No image URL returned');
+
+                const updatedOutfits = [...state.outfits];
+                updatedOutfits[index] = { 
+                    ...updatedOutfits[index], 
+                    imageUrl: data.imageUrl, 
+                    visualReady: true 
+                };
+                
+                setState({ 
+                    outfits: updatedOutfits,
+                    generatingImages: { ...state.generatingImages, [index]: false }
+                });
+                
+            } catch (error) {
+                console.error('Error:', error);
+                alert(`Failed to generate image: ${error.message}`);
+                setState({ 
+                    generatingImages: { ...state.generatingImages, [index]: false }
+                });
+            }
+        }
+
+        async function generateOutfits() {
+            if (!state.photo || !state.occasion || !state.vibe) {
+                alert('Please upload a photo and fill in all fields!');
+                return;
+            }
+
+            setState({ loading: true, outfits: [] });
+
+            try {
+                const response = await fetch(CLAUDE_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'claude-sonnet-4-20250514',
+                        max_tokens: 1000,
+                        messages: [{
+                            role: 'user',
+                            content: [
+                                {
+                                    type: 'image',
+                                    source: {
+                                        type: 'base64',
+                                        media_type: 'image/jpeg',
+                                        data: state.photo.split(',')[1]
+                                    }
+                                },
+                                {
+                                    type: 'text',
+                                    text: `You are a professional fashion stylist AI. Analyze this person's photo carefully.
+
+First, provide a brief physical description for an AI image generator (age range, build, general appearance - 1 sentence).
+
+Then create 3 complete outfit recommendations for: "${state.occasion}" with vibe: "${state.vibe}".
+
+Respond with JSON in this exact format:
+{
+  "personDescription": "brief physical description for image generation",
+  "outfits": [
+    {
+      "name": "Outfit name",
+      "description": "Why this outfit works (2 sentences)",
+      "items": [
+        {"piece": "Top", "details": "VERY specific: exact color, fabric, style, fit details", "searchTerm": "search term"},
+        {"piece": "Bottom", "details": "VERY specific: exact color, fabric, style, fit details", "searchTerm": "search term"},
+        {"piece": "Shoes", "details": "VERY specific: exact color, style, heel height", "searchTerm": "search term"},
+        {"piece": "Accessories", "details": "VERY specific: what items, colors, materials", "searchTerm": "search term"}
+      ]
+    }
+  ]
+}
+
+Be EXTREMELY detailed with colors, fabrics, and styles so AI can visualize accurately.`
+                                }
+                            ]
+                        }]
+                    })
+                });
+
+                const data = await response.json();
+                const text = data.content.map(item => item.text || '').join('\n');
+                
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    const result = JSON.parse(jsonMatch[0]);
+                    const outfitsWithDesc = result.outfits.map(outfit => ({
+                        ...outfit,
+                        personDesc: result.personDescription,
+                        visualReady: false
+                    }));
+                    setState({ outfits: outfitsWithDesc, loading: false });
+                } else {
+                    throw new Error('Could not parse outfit data');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert(`Error: ${error.message}`);
+                setState({ loading: false });
+            }
+        }
+
+        function render() {
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <!-- Header -->
+                <div class="text-center mb-8">
+                    <div class="flex items-center justify-center gap-2 mb-2">
+                        <svg class="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3l14 9-14 9V3z"/>
+                        </svg>
+                        <h1 class="text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                            StyleAI
+                        </h1>
+                    </div>
+                    <p class="text-gray-600">Your Personal AI Fashion Stylist</p>
+                    
+                    ${!state.showTokenInput && !state.replicateToken ? `
+                        <button onclick="window.toggleTokenInput()" class="mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm">
+                            Setup API Key (Required for Images)
+                        </button>
+                    ` : ''}
+                    
+                    ${state.showTokenInput ? `
+                        <div class="mt-4 bg-white rounded-lg p-4 max-w-2xl mx-auto shadow-lg">
+                            <h3 class="font-semibold mb-2">Add Your Replicate API Token</h3>
+                            <p class="text-sm text-gray-600 mb-3">
+                                Get your free token at <a href="https://replicate.com/account/api-tokens" target="_blank" class="text-blue-600 underline">replicate.com/account/api-tokens</a>
+                            </p>
+                            <div class="flex gap-2">
+                                <input
+                                    type="password"
+                                    placeholder="Paste your Replicate API token here..."
+                                    class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                                    value="${state.replicateToken}"
+                                    oninput="window.updateToken(this.value)"
+                                />
+                                <button onclick="window.toggleTokenInput()" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                                    Save
+                                </button>
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    ${state.replicateToken && !state.showTokenInput ? `
+                        <div class="mt-2 text-sm text-green-600 flex items-center justify-center gap-2">
+                            ✓ API connected
+                            <button onclick="window.toggleTokenInput()" class="text-blue-600 underline">
+                                change
+                            </button>
+                        </div>
+                    ` : ''}
+                </div>
+
+                <!-- Upload Section -->
+                <div class="bg-white rounded-2xl shadow-xl p-8 mb-8">
+                    <h2 class="text-2xl font-semibold mb-6 text-gray-800">Step 1: Upload Your Photo</h2>
+                    
+                    <div class="flex flex-col md:flex-row gap-6">
+                        <div class="flex-1">
+                            <label class="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed border-purple-300 rounded-xl cursor-pointer hover:border-purple-500 transition-colors bg-purple-50">
+                                ${state.photo ? `
+                                    <img src="${state.photo}" alt="Uploaded" class="w-full h-full object-cover rounded-xl" />
+                                ` : `
+                                    <div class="flex flex-col items-center">
+                                        <svg class="w-12 h-12 text-purple-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                                        </svg>
+                                        <p class="text-sm text-gray-600">Click to upload your photo</p>
+                                    </div>
+                                `}
+                                <input type="file" class="hidden" accept="image/*" onchange="window.handleFileUpload(event)" />
+                            </label>
+                        </div>
+
+                        <div class="flex-1 space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">What's the occasion?</label>
+                                <input
+                                    type="text"
+                                    placeholder="e.g., job interview, date night, brunch with friends..."
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                    value="${state.occasion}"
+                                    oninput="window.updateOccasion(this.value)"
+                                />
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">What vibe are you going for?</label>
+                                <input
+                                    type="text"
+                                    placeholder="e.g., professional, casual-chic, edgy, romantic..."
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                    value="${state.vibe}"
+                                    oninput="window.updateVibe(this.value)"
+                                />
+                            </div>
+
+                            <button
+                                onclick="window.generateOutfits()"
+                                ${state.loading || !state.photo || !state.occasion || !state.vibe ? 'disabled' : ''}
+                                class="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-3 rounded-lg font-semibold hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                            >
+                                ${state.loading ? `
+                                    <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Creating Your Looks...
+                                ` : `
+                                    ✨ Generate Outfits
+                                `}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                ${state.outfits.length > 0 ? `
+                    <div class="space-y-6">
+                        <h2 class="text-2xl font-semibold text-gray-800">Your Personalized Outfit Ideas</h2>
+                        
+                        ${state.outfits.map((outfit, idx) => `
+                            <div class="bg-white rounded-2xl shadow-xl p-6">
+                                <div class="flex flex-col lg:flex-row gap-6">
+                                    <div class="lg:w-1/2">
+                                        <div class="bg-gradient-to-br from-purple-100 to-pink-100 rounded-xl overflow-hidden h-full min-h-[400px] flex items-center justify-center">
+                                            ${state.generatingImages[idx] ? `
+                                                <div class="text-center p-6">
+                                                    <svg class="w-12 h-12 text-purple-600 animate-spin mx-auto mb-4" fill="none" viewBox="0 0 24 24">
+                                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                    </svg>
+                                                    <p class="text-gray-600 font-medium">Generating your outfit image...</p>
+                                                    <p class="text-sm text-gray-500 mt-2">This takes about 20-30 seconds</p>
+                                                </div>
+                                            ` : outfit.visualReady && outfit.imageUrl ? `
+                                                <img src="${outfit.imageUrl}" alt="${outfit.name}" class="w-full h-full object-cover" />
+                                            ` : `
+                                                <div class="text-center p-6">
+                                                    <svg class="w-12 h-12 text-purple-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                                    </svg>
+                                                    ${!state.replicateToken ? `
+                                                        <p class="text-gray-600">Add your API token above to generate outfit images</p>
+                                                    ` : `
+                                                        <button
+                                                            onclick="window.generateOutfitImage(${idx})"
+                                                            class="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                                                        >
+                                                            Generate Visual
+                                                        </button>
+                                                    `}
+                                                </div>
+                                            `}
+                                        </div>
+                                    </div>
+
+                                    <div class="lg:w-1/2">
+                                        <h3 class="text-2xl font-bold text-purple-600 mb-2">${outfit.name}</h3>
+                                        <p class="text-gray-600 mb-4 italic">${outfit.description}</p>
+                                        
+                                        <div class="space-y-3">
+                                            ${outfit.items.map(item => `
+                                                <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                                                    <div class="flex justify-between items-start mb-2">
+                                                        <h4 class="font-semibold text-gray-800">${item.piece}</h4>
+                                                        
+                                                            href="https://www.google.com/search?q=${encodeURIComponent(item.searchTerm)}&tbm=shop"
+                                                            target="_blank"
+                                                            class="flex items-center gap-1 text-sm text-purple-600 hover:text-purple-800"
+                                                        >
+                                                            🛍️ Shop
+                                                        </a>
+                                                    </div>
+                                                    <p class="text-sm text-gray-600">${item.details}</p>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : ''}
+            `;
+        }
+
+        // Expose functions to window
+        window.handleFileUpload = handleFileUpload;
+        window.updateOccasion = updateOccasion;
+        window.updateVibe = updateVibe;
+        window.updateToken = updateToken;
+        window.toggleTokenInput = () => setState({ showTokenInput: !state.showTokenInput });
+        window.generateOutfits = generateOutfits;
+        window.generateOutfitImage = (idx) => {
+            const outfit = state.outfits[idx];
+            generateOutfitImage(outfit, idx, outfit.personDesc || 'fashion model');
+        };
+
+        // Initial render
+        render();
+    </script>
+</body>
+</html>
