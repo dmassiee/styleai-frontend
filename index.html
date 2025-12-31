@@ -18,8 +18,7 @@
     <div id="app" class="max-w-6xl mx-auto p-6"></div>
 
     <script type="module">
-        const BACKEND_URL = 'https://cura-backend-two.vercel.app/api/generate-image';
-        const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+        const BACKEND_URL = 'https://cura-backend-two.vercel.app';
 
         let state = {
             photo: null,
@@ -77,7 +76,7 @@
                 const itemsList = outfit.items.map(item => item.details).join(', ');
                 const prompt = `Professional fashion photography, full body shot, ${personDescription} fashion model wearing ${itemsList}, ${state.vibe} style, studio lighting, high quality, detailed clothing, fashion catalog, professional photography, 4k, sharp focus`;
 
-                const response = await fetch(BACKEND_URL, {
+                const response = await fetch(`${BACKEND_URL}/api/generate-image`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -126,70 +125,35 @@
             setState({ loading: true, outfits: [] });
 
             try {
-                const response = await fetch(CLAUDE_API_URL, {
+                const response = await fetch(`${BACKEND_URL}/api/generate-outfits`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'claude-sonnet-4-20250514',
-                        max_tokens: 1000,
-                        messages: [{
-                            role: 'user',
-                            content: [
-                                {
-                                    type: 'image',
-                                    source: {
-                                        type: 'base64',
-                                        media_type: 'image/jpeg',
-                                        data: state.photo.split(',')[1]
-                                    }
-                                },
-                                {
-                                    type: 'text',
-                                    text: `You are a professional fashion stylist AI. Analyze this person's photo carefully.
-
-First, provide a brief physical description for an AI image generator (age range, build, general appearance - 1 sentence).
-
-Then create 3 complete outfit recommendations for: "${state.occasion}" with vibe: "${state.vibe}".
-
-Respond with JSON in this exact format:
-{
-  "personDescription": "brief physical description for image generation",
-  "outfits": [
-    {
-      "name": "Outfit name",
-      "description": "Why this outfit works (2 sentences)",
-      "items": [
-        {"piece": "Top", "details": "VERY specific: exact color, fabric, style, fit details", "searchTerm": "search term"},
-        {"piece": "Bottom", "details": "VERY specific: exact color, fabric, style, fit details", "searchTerm": "search term"},
-        {"piece": "Shoes", "details": "VERY specific: exact color, style, heel height", "searchTerm": "search term"},
-        {"piece": "Accessories", "details": "VERY specific: what items, colors, materials", "searchTerm": "search term"}
-      ]
-    }
-  ]
-}
-
-Be EXTREMELY detailed with colors, fabrics, and styles so AI can visualize accurately.`
-                                }
-                            ]
-                        }]
+                        photo: state.photo,
+                        occasion: state.occasion,
+                        vibe: state.vibe
                     })
                 });
 
-                const data = await response.json();
-                const text = data.content.map(item => item.text || '').join('\n');
-                
-                const jsonMatch = text.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                    const result = JSON.parse(jsonMatch[0]);
-                    const outfitsWithDesc = result.outfits.map(outfit => ({
-                        ...outfit,
-                        personDesc: result.personDescription,
-                        visualReady: false
-                    }));
-                    setState({ outfits: outfitsWithDesc, loading: false });
-                } else {
-                    throw new Error('Could not parse outfit data');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Backend error: ${response.status} - ${errorText}`);
                 }
+
+                const result = await response.json();
+                
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+
+                const outfitsWithDesc = result.outfits.map(outfit => ({
+                    ...outfit,
+                    personDesc: result.personDescription,
+                    visualReady: false
+                }));
+                
+                setState({ outfits: outfitsWithDesc, loading: false });
+                
             } catch (error) {
                 console.error('Error:', error);
                 alert(`Error: ${error.message}`);
